@@ -9,8 +9,7 @@ from datetime import datetime
 import anthropic
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
 
 # Load environment variables
 load_dotenv()
@@ -31,7 +30,10 @@ app.add_middleware(
 SQLALCHEMY_DATABASE_URL = "sqlite:///./changelogs.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
+# Updated Base class for SQLAlchemy 2.0
+class Base(DeclarativeBase):
+    pass
 
 # Database model
 class ChangelogDB(Base):
@@ -117,7 +119,7 @@ Format the changelog in Markdown with clear sections.
 
     try:
         response = client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-opus-20240229",
             max_tokens=1000,
             messages=[
                 {"role": "user", "content": prompt}
@@ -138,6 +140,7 @@ Format the changelog in Markdown with clear sections.
 # API routes
 @app.post("/api/changelogs/", response_model=ChangelogOutput)
 def create_changelog(input_data: ChangelogInput, db: Session = Depends(get_db)):
+    print(f"Creating changelog for version: {input_data.version}")
     # Generate changelog content
     generated_content = generate_changelog(input_data)
     
@@ -150,21 +153,45 @@ def create_changelog(input_data: ChangelogInput, db: Session = Depends(get_db)):
         generated_content=generated_content,
         published=False
     )
-    
+
     db.add(db_changelog)
+    print("Committing changelog")
     db.commit()
+    print("Refreshing changelog")
     db.refresh(db_changelog)
-    
-    return db_changelog
+
+    return ChangelogOutput(
+        id=db_changelog.id,
+        version=db_changelog.version,
+        title=db_changelog.title,
+        description=db_changelog.description,
+        generated_content=db_changelog.generated_content,
+        created_at=db_changelog.created_at,
+        published=db_changelog.published
+    )
+
 
 @app.get("/api/changelogs/", response_model=List[ChangelogOutput])
 def list_changelogs(published_only: bool = False, db: Session = Depends(get_db)):
+    print("Listing changelogs")
+    changelogs = []
     if published_only:
-        return db.query(ChangelogDB).filter(ChangelogDB.published == True).order_by(ChangelogDB.created_at.desc()).all()
-    return db.query(ChangelogDB).order_by(ChangelogDB.created_at.desc()).all()
+        changelogs = b.query(ChangelogDB).filter(ChangelogDB.published == True).order_by(ChangelogDB.created_at.desc()).all()
+    changelogs = db.query(ChangelogDB).order_by(ChangelogDB.created_at.desc()).all()
+
+    return [ChangelogOutput(
+        id=changelog.id,
+        version=changelog.version,
+        title=changelog.title,
+        description=changelog.description,
+        generated_content=changelog.generated_content,
+        created_at=changelog.created_at,
+        published=changelog.published
+    ) for changelog in changelogs]
 
 @app.get("/api/changelogs/{changelog_id}", response_model=ChangelogOutput)
 def get_changelog(changelog_id: int, db: Session = Depends(get_db)):
+    print(f"Getting changelog with ID: {changelog_id}")
     changelog = db.query(ChangelogDB).filter(ChangelogDB.id == changelog_id).first()
     if not changelog:
         raise HTTPException(status_code=404, detail="Changelog not found")
@@ -172,6 +199,7 @@ def get_changelog(changelog_id: int, db: Session = Depends(get_db)):
 
 @app.patch("/api/changelogs/{changelog_id}/publish", response_model=ChangelogOutput)
 def publish_changelog(changelog_id: int, publish_data: ChangelogPublish, db: Session = Depends(get_db)):
+    print(f"Publishing changelog with ID: {changelog_id}")
     changelog = db.query(ChangelogDB).filter(ChangelogDB.id == changelog_id).first()
     if not changelog:
         raise HTTPException(status_code=404, detail="Changelog not found")
@@ -183,6 +211,7 @@ def publish_changelog(changelog_id: int, publish_data: ChangelogPublish, db: Ses
 
 @app.put("/api/changelogs/{changelog_id}", response_model=ChangelogOutput)
 def update_changelog(changelog_id: int, input_data: ChangelogInput, db: Session = Depends(get_db)):
+    print(f"Updating changelog with ID: {changelog_id}")
     changelog = db.query(ChangelogDB).filter(ChangelogDB.id == changelog_id).first()
     if not changelog:
         raise HTTPException(status_code=404, detail="Changelog not found")
@@ -202,13 +231,17 @@ def update_changelog(changelog_id: int, input_data: ChangelogInput, db: Session 
 
 @app.delete("/api/changelogs/{changelog_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_changelog(changelog_id: int, db: Session = Depends(get_db)):
+    print(f"Deleting changelog with ID: {changelog_id}")
     changelog = db.query(ChangelogDB).filter(ChangelogDB.id == changelog_id).first()
     if not changelog:
         raise HTTPException(status_code=404, detail="Changelog not found")
-    
+
     db.delete(changelog)
     db.commit()
     return None
 
 # Run the application
-if __name__ == "__main
+if __name__ == "__main__":
+    print("Starting server...")
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    print("Server started")
