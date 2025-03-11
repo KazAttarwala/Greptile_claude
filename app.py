@@ -78,7 +78,12 @@ class ChangelogPublish(BaseModel):
     published: bool
 
 # Initialize AI client
-client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+try:
+    # Try the simple initialization first (newer versions)
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+except TypeError:
+    # Fall back to older version initialization if needed
+    client = anthropic.Client(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 # Generate changelog content using AI
 def generate_changelog(input_data: ChangelogInput) -> str:
